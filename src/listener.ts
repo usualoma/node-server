@@ -1,6 +1,11 @@
 import type { IncomingMessage, ServerResponse, OutgoingHttpHeaders } from 'node:http'
 import type { Http2ServerRequest, Http2ServerResponse } from 'node:http2'
-import { getAbortController, newRequest, Request as LightweightRequest } from './request'
+import {
+  getAbortController,
+  newRequest,
+  Request as LightweightRequest,
+  RequestError,
+} from './request'
 import { cacheKey, getInternalBody, Response as LightweightResponse } from './response'
 import type { CustomErrorHandler, FetchCallback, HttpBindings } from './types'
 import { writeFromReadableStream, buildOutgoingHttpHeaders } from './utils'
@@ -18,16 +23,23 @@ const handleFetchError = (e: unknown): Response =>
         : 500,
   })
 
-const handleResponseError = (e: unknown, outgoing: ServerResponse | Http2ServerResponse) => {
+const handleError = (e: unknown, outgoing: ServerResponse | Http2ServerResponse) => {
   const err = (e instanceof Error ? e : new Error('unknown error', { cause: e })) as Error & {
     code: string
   }
+
   if (err.code === 'ERR_STREAM_PREMATURE_CLOSE') {
     console.info('The user aborted a request.')
   } else {
-    console.error(e)
+    let status = 500
+    if (err instanceof RequestError) {
+      status = 400
+    } else {
+      console.error(e)
+    }
+
     if (!outgoing.headersSent) {
-      outgoing.writeHead(500, { 'Content-Type': 'text/plain' })
+      outgoing.writeHead(status, { 'Content-Type': 'text/plain' })
     }
     outgoing.end(`Error: ${err.message}`)
     outgoing.destroy(err)
@@ -47,7 +59,7 @@ const responseViaCache = (
   } else {
     outgoing.writeHead(status, header)
     return writeFromReadableStream(body, outgoing)?.catch(
-      (e) => handleResponseError(e, outgoing) as undefined
+      (e) => handleError(e, outgoing) as undefined
     )
   }
 }
@@ -159,18 +171,18 @@ export const getRequestListener = (
   ) => {
     let res
 
-    // `fetchCallback()` requests a Request object, but global.Request is expensive to generate,
-    // so generate a pseudo Request object with only the minimum required information.
-    const req = newRequest(incoming)
-
-    // Detect if request was aborted.
-    outgoing.on('close', () => {
-      if (incoming.destroyed) {
-        req[getAbortController]().abort()
-      }
-    })
-
     try {
+      // `fetchCallback()` requests a Request object, but global.Request is expensive to generate,
+      // so generate a pseudo Request object with only the minimum required information.
+      const req = newRequest(incoming)
+
+      // Detect if request was aborted.
+      outgoing.on('close', () => {
+        if (incoming.destroyed) {
+          req[getAbortController]().abort()
+        }
+      })
+
       res = fetchCallback(req, { incoming, outgoing } as HttpBindings) as
         | Response
         | Promise<Response>
@@ -189,14 +201,14 @@ export const getRequestListener = (
           res = handleFetchError(e)
         }
       } else {
-        return handleResponseError(e, outgoing)
+        return handleError(e, outgoing)
       }
     }
 
     try {
       return responseViaResponseObject(res, outgoing, options)
     } catch (e) {
-      return handleResponseError(e, outgoing)
+      return handleError(e, outgoing)
     }
   }
 }

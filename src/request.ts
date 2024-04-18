@@ -6,6 +6,15 @@ import { Http2ServerRequest } from 'node:http2'
 import { Readable } from 'node:stream'
 import type { TLSSocket } from 'node:tls'
 
+export class RequestError extends Error {
+  constructor(
+    message: string,
+    public code: string = 'ERR_INVALID_REQUEST'
+  ) {
+    super(message)
+  }
+}
+
 export const GlobalRequest = global.Request
 export class Request extends GlobalRequest {
   constructor(input: string | Request, options?: RequestInit) {
@@ -114,15 +123,20 @@ Object.setPrototypeOf(requestPrototype, Request.prototype)
 export const newRequest = (incoming: IncomingMessage | Http2ServerRequest) => {
   const req = Object.create(requestPrototype)
   req[incomingKey] = incoming
-  req[urlKey] = new URL(
+
+  const host = incoming instanceof Http2ServerRequest ? incoming.authority : incoming.headers.host
+  if (!host) {
+    throw new RequestError('Missing host header')
+  }
+  const url = new URL(
     `${
       incoming instanceof Http2ServerRequest ||
       (incoming.socket && (incoming.socket as TLSSocket).encrypted)
         ? 'https'
         : 'http'
-    }://${incoming instanceof Http2ServerRequest ? incoming.authority : incoming.headers.host}${
-      incoming.url
-    }`
-  ).href
+    }://${host}${incoming.url}`
+  )
+  req[urlKey] = url.href
+
   return req
 }
