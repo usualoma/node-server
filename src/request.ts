@@ -136,6 +136,10 @@ export const newRequest = (incoming: IncomingMessage | Http2ServerRequest) => {
         : 'http'
     }://${host}${incoming.url}`
   )
+  if (url.hostname !== host) {
+    throw new RequestError('Invalid hostname')
+  }
+
   req[urlKey] = url.href
 
   return req
