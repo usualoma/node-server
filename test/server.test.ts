@@ -169,6 +169,15 @@ describe('various response body types', () => {
         })
         return response
       })
+      app.get('/blob-chunked', () => {
+        const response = new Response(new Blob([new Uint8Array([1, 2, 3])]), {
+          headers: {
+            'transfer-encoding': 'chunked',
+            'content-type': 'application/octet-stream',
+          },
+        })
+        return response
+      })
       const readableStreamPromise = new Promise<void>((resolve) => {
         resolveReadableStreamPromise = resolve
       })
@@ -230,6 +239,15 @@ describe('various response body types', () => {
       expect(res.status).toBe(200)
       expect(res.headers['content-type']).toMatch('application/octet-stream')
       expect(res.headers['content-length']).toMatch('3')
+      expect(res.body).toEqual(Buffer.from([1, 2, 3]))
+    })
+
+    it('Should return 200 response - GET /blob-chunked', async () => {
+      const res = await request(server).get('/blob-chunked')
+      expect(res.status).toBe(200)
+      expect(res.headers['transfer-encoding']).toMatch('chunked')
+      expect(res.headers['content-type']).toMatch('application/octet-stream')
+      expect(res.headers['content-length']).toBeUndefined()
       expect(res.body).toEqual(Buffer.from([1, 2, 3]))
     })
 
